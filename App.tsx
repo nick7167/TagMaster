@@ -12,6 +12,8 @@ import { PricingModal } from './components/PricingModal';
 export default function App() {
   const [theme, setTheme] = useState('');
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy>(STRATEGIES[0]);
+  
+  // Application State
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,7 @@ export default function App() {
   // Auth & Profile State
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
   
   // UI State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -27,50 +30,123 @@ export default function App() {
   
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-      
-    if (data) {
-      setProfile(data);
-    }
-  };
+  // --- Robust Data Fetching ---
 
-  // Check Session on Mount
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user || null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
+  const fetchProfile = useCallback(async (userId: string) => {
+    setIsProfileLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (data) {
+        setProfile(data);
+      } else if (error && error.code === 'PGRST116') {
+        // "Row not found" - Self Healing: Create profile if missing
+        console.warn("Profile missing for user, creating default...");
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert([{ id: userId, email: user?.email || 'user@tagmaster.ai', credits: 3 }])
+          .select()
+          .single();
+        
+        if (newProfile) setProfile(newProfile);
       }
-      setInitialAuthCheckDone(true);
-    };
-    
-    checkSession();
+    } catch (err) {
+      console.error("Profile fetch failed", err);
+    } finally {
+      setIsProfileLoading(false);
+    }
+  }, [user?.email]);
 
+  // --- Auth Lifecycle & Realtime Updates ---
+
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      // 1. Get Session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (mounted) {
+        setUser(session?.user || null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        }
+        setInitialAuthCheckDone(true);
+      }
+    };
+
+    initializeAuth();
+
+    // 2. Listen for Auth Changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user || null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
+      if (!mounted) return;
+      
+      const currentUser = session?.user || null;
+      setUser(currentUser);
+
+      if (currentUser) {
+        // Only fetch if we don't have it or ID changed
+        if (!profile || profile.id !== currentUser.id) {
+           await fetchProfile(currentUser.id);
+        }
       } else {
         setProfile(null);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [fetchProfile]);
+
+  // --- Realtime Database Subscription ---
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          setProfile(payload.new as UserProfile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  // --- Focus Refetching ---
+  // If user tabs away and comes back, ensure data is fresh
+  useEffect(() => {
+    const onFocus = () => {
+      if (user) fetchProfile(user.id);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [user, fetchProfile]);
+
+
+  // --- Actions ---
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    setProfile(null);
+    setUser(null);
     setResult(null); 
-  };
-
-  const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
+    await supabase.auth.signOut();
   };
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
@@ -83,8 +159,11 @@ export default function App() {
       return;
     }
 
-    // CREDIT GATE
-    if (profile && profile.credits < 1) {
+    // FAIL-CLOSED CREDIT GATE
+    // If profile is still loading, or if it failed to load, or if credits < 1 -> BLOCK
+    if (isProfileLoading) return; // Just wait
+    
+    if (!profile || profile.credits < 1) {
       setIsPricingModalOpen(true);
       return;
     }
@@ -96,17 +175,21 @@ export default function App() {
     try {
       const data = await generateHashtags(theme, selectedStrategy);
       
-      // Deduct Credit
-      if (user && profile) {
-        const { error: creditError } = await supabase
-          .from('profiles')
-          .update({ credits: profile.credits - 1 })
-          .eq('id', user.id);
+      // Optimistic UI update
+      if (profile) {
+        setProfile({ ...profile, credits: profile.credits - 1 });
+      }
+      
+      // Deduct Credit in DB
+      const { error: creditError } = await supabase
+        .from('profiles')
+        .update({ credits: profile.credits - 1 })
+        .eq('id', user.id);
           
-        if (!creditError) {
-          // Update local state instantly
-          setProfile(prev => prev ? ({...prev, credits: prev.credits - 1}) : null);
-        }
+      if (creditError) {
+        // Revert if DB fail
+        console.error("Credit deduction failed", creditError);
+        fetchProfile(user.id);
       }
 
       setResult(data);
@@ -115,10 +198,12 @@ export default function App() {
       }, 100);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
+      // Re-fetch profile just in case state got desynced on error
+      if (user) fetchProfile(user.id);
     } finally {
       setIsLoading(false);
     }
-  }, [theme, selectedStrategy, user, profile]);
+  }, [theme, selectedStrategy, user, profile, isProfileLoading, fetchProfile]);
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden text-slate-100 selection:bg-purple-500/30">
@@ -126,17 +211,17 @@ export default function App() {
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={() => refreshProfile()}
+        onSuccess={() => user && fetchProfile(user.id)}
       />
 
       <PricingModal 
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
         user={user}
-        onSuccess={() => refreshProfile()}
+        onSuccess={() => user && fetchProfile(user.id)}
       />
 
-      {/* Minimal Header */}
+      {/* Header */}
       <header className="fixed top-0 w-full z-50 px-4 md:px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md border-b border-white/5 transition-all">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.location.reload()}>
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-purple-500/20">#</div>
@@ -144,63 +229,70 @@ export default function App() {
         </div>
 
         {/* Auth Status */}
-        <div className="flex items-center">
-          {initialAuthCheckDone && (
-             user ? (
-               <div className="flex items-center gap-3 md:gap-6">
-                  {/* Credit Counter */}
-                  <div className="hidden md:flex flex-col items-end">
-                    <span className="text-xs text-slate-400">Credits</span>
-                    <div className="flex items-center gap-1.5">
-                       <span className={`text-sm font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                         {profile ? profile.credits : 0}
-                       </span>
-                       <button 
-                         onClick={() => setIsPricingModalOpen(true)}
-                         className="text-[10px] bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 rounded transition-colors"
-                       >
-                         + BUY
-                       </button>
-                    </div>
-                  </div>
-
-                  {/* Mobile Credit Display */}
-                  <button 
-                     onClick={() => setIsPricingModalOpen(true)}
-                     className="md:hidden flex items-center gap-1 bg-slate-800/50 px-2 py-1 rounded-lg border border-white/10"
-                  >
-                     <span className={`text-xs font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+        <div className="flex items-center min-h-[32px]">
+          {!initialAuthCheckDone ? (
+            // Loading state for auth
+            <div className="h-8 w-24 bg-slate-800/50 animate-pulse rounded-lg"></div>
+          ) : user ? (
+            <div className="flex items-center gap-3 md:gap-6 animate-fade-in-up">
+              {/* Credit Counter */}
+              <div className="hidden md:flex flex-col items-end">
+                <span className="text-xs text-slate-400">Credits</span>
+                <div className="flex items-center gap-1.5 h-5">
+                  {isProfileLoading && !profile ? (
+                     <div className="h-4 w-8 bg-slate-800 animate-pulse rounded"></div>
+                  ) : (
+                    <>
+                      <span className={`text-sm font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {profile ? profile.credits : 0}
-                     </span>
-                     <span className="text-[10px] text-slate-400">cr</span>
-                  </button>
+                      </span>
+                      <button 
+                        onClick={() => setIsPricingModalOpen(true)}
+                        className="text-[10px] bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 rounded transition-colors"
+                      >
+                        + BUY
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
 
-                  <div className="h-8 w-px bg-white/10 mx-1 hidden md:block"></div>
+              {/* Mobile Credit Display */}
+              <button 
+                 onClick={() => setIsPricingModalOpen(true)}
+                 className="md:hidden flex items-center gap-1 bg-slate-800/50 px-2 py-1 rounded-lg border border-white/10"
+              >
+                 <span className={`text-xs font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {profile ? profile.credits : 0}
+                 </span>
+                 <span className="text-[10px] text-slate-400">cr</span>
+              </button>
 
-                  <div className="hidden md:flex flex-col items-end">
-                    <span className="text-xs text-slate-400">Account</span>
-                    <span className="text-xs font-medium text-white max-w-[100px] truncate">{user.email}</span>
-                  </div>
-                  
-                  <button 
-                    onClick={handleSignOut}
-                    className="p-2 md:px-3 md:py-1.5 rounded-lg text-xs font-medium text-slate-300 border border-white/10 hover:bg-slate-800 transition-colors"
-                    title="Sign Out"
-                  >
-                    <span className="hidden md:inline">Sign Out</span>
-                    <svg className="w-5 h-5 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                  </button>
-               </div>
-             ) : (
-               <button 
-                 onClick={() => setIsAuthModalOpen(true)}
-                 className="px-4 py-2 rounded-lg text-xs md:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-all border border-white/5"
-               >
-                 Login / Sign Up
-               </button>
-             )
+              <div className="h-8 w-px bg-white/10 mx-1 hidden md:block"></div>
+
+              <div className="hidden md:flex flex-col items-end">
+                <span className="text-xs text-slate-400">Account</span>
+                <span className="text-xs font-medium text-white max-w-[100px] truncate">{user.email}</span>
+              </div>
+              
+              <button 
+                onClick={handleSignOut}
+                className="p-2 md:px-3 md:py-1.5 rounded-lg text-xs font-medium text-slate-300 border border-white/10 hover:bg-slate-800 transition-colors"
+                title="Sign Out"
+              >
+                <span className="hidden md:inline">Sign Out</span>
+                <svg className="w-5 h-5 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-4 py-2 rounded-lg text-xs md:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-all border border-white/5 animate-fade-in-up"
+            >
+              Login / Sign Up
+            </button>
           )}
         </div>
       </header>
@@ -240,20 +332,27 @@ export default function App() {
                 />
                 <button
                   type="submit"
-                  disabled={isLoading || !theme}
+                  disabled={isLoading || !theme || (user && isProfileLoading)}
                   className={`mr-0 md:mr-1 px-5 py-3 md:px-8 md:py-4 rounded-xl font-bold text-xs md:text-sm tracking-wide transition-all duration-300 flex-shrink-0 ${
-                    isLoading || !theme 
+                    isLoading || !theme || (user && isProfileLoading)
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                     : 'bg-white text-black hover:bg-slate-200 hover:scale-105 shadow-lg shadow-white/5'
                   }`}
                 >
-                  {isLoading ? <Spinner /> : (user ? 'GENERATE (1 CR)' : 'LOGIN TO GENERATE')}
+                   {isLoading 
+                      ? <Spinner /> 
+                      : !user 
+                        ? 'LOGIN TO GENERATE' 
+                        : isProfileLoading 
+                          ? 'CHECKING...' 
+                          : 'GENERATE (1 CR)'
+                   }
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Strategy Grid - Expanded Width */}
+          {/* Strategy Grid */}
           <div className="w-full space-y-6">
             <div className="flex items-center justify-between px-1 border-b border-white/5 pb-4 max-w-7xl mx-auto">
                 <span className="text-xs md:text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
