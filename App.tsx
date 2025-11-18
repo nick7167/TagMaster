@@ -32,7 +32,8 @@ export default function App() {
 
   // --- Robust Data Fetching ---
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  // Replaced dependency on state 'user' with explicit arguments to prevent stale closures
+  const fetchProfile = useCallback(async (userId: string, userEmail?: string) => {
     setIsProfileLoading(true);
     try {
       const { data, error } = await supabase
@@ -43,23 +44,35 @@ export default function App() {
 
       if (data) {
         setProfile(data);
-      } else if (error && error.code === 'PGRST116') {
-        // "Row not found" - Self Healing: Create profile if missing
-        console.warn("Profile missing for user, creating default...");
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert([{ id: userId, email: user?.email || 'user@tagmaster.ai', credits: 3 }])
-          .select()
-          .single();
-        
-        if (newProfile) setProfile(newProfile);
+      } else if (error) {
+        // Self Healing: Create profile if specifically missing (PGRST116)
+        if (error.code === 'PGRST116') {
+          console.warn("Profile missing for user, creating default...");
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert([{ 
+              id: userId, 
+              email: userEmail || 'user@tagmaster.ai', 
+              credits: 3 
+            }])
+            .select()
+            .single();
+          
+          if (newProfile) {
+            setProfile(newProfile);
+          } else {
+             console.error("Failed to auto-create profile:", createError);
+          }
+        } else {
+          console.error("Database error fetching profile:", error);
+        }
       }
     } catch (err) {
-      console.error("Profile fetch failed", err);
+      console.error("Profile fetch unexpected error", err);
     } finally {
       setIsProfileLoading(false);
     }
-  }, [user?.email]);
+  }, []);
 
   // --- Auth Lifecycle & Realtime Updates ---
 
@@ -67,32 +80,47 @@ export default function App() {
     let mounted = true;
 
     const initializeAuth = async () => {
-      // 1. Get Session
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (mounted) {
-        setUser(session?.user || null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
+      try {
+        // Add a timeout race to prevent indefinite hanging if Supabase is unreachable
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject("Auth timeout"), 5000));
+        const sessionPromise = supabase.auth.getSession();
+        
+        // @ts-ignore
+        const result: any = await Promise.race([sessionPromise, timeoutPromise]);
+        const session = result?.data?.session;
+
+        if (mounted) {
+          if (session?.user) {
+            setUser(session.user);
+            // Pass email directly from session, do not rely on 'user' state yet
+            await fetchProfile(session.user.id, session.user.email);
+          } else {
+            setUser(null);
+          }
         }
-        setInitialAuthCheckDone(true);
+      } catch (err) {
+        console.warn("Auth initialization fallback:", err);
+        // In case of error/timeout, assume logged out but allow app to render
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setInitialAuthCheckDone(true);
       }
     };
 
     initializeAuth();
 
-    // 2. Listen for Auth Changes
+    // Listen for Auth Changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return;
       
       const currentUser = session?.user || null;
+      
+      // Update user state
       setUser(currentUser);
 
       if (currentUser) {
-        // Only fetch if we don't have it or ID changed
-        if (!profile || profile.id !== currentUser.id) {
-           await fetchProfile(currentUser.id);
-        }
+        // Always refresh profile on auth change to ensure sync
+        await fetchProfile(currentUser.id, currentUser.email);
       } else {
         setProfile(null);
       }
@@ -130,10 +158,9 @@ export default function App() {
   }, [user]);
 
   // --- Focus Refetching ---
-  // If user tabs away and comes back, ensure data is fresh
   useEffect(() => {
     const onFocus = () => {
-      if (user) fetchProfile(user.id);
+      if (user) fetchProfile(user.id, user.email);
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
@@ -160,8 +187,7 @@ export default function App() {
     }
 
     // FAIL-CLOSED CREDIT GATE
-    // If profile is still loading, or if it failed to load, or if credits < 1 -> BLOCK
-    if (isProfileLoading) return; // Just wait
+    if (isProfileLoading) return; 
     
     if (!profile || profile.credits < 1) {
       setIsPricingModalOpen(true);
@@ -187,9 +213,8 @@ export default function App() {
         .eq('id', user.id);
           
       if (creditError) {
-        // Revert if DB fail
         console.error("Credit deduction failed", creditError);
-        fetchProfile(user.id);
+        fetchProfile(user.id, user.email); // Revert/Sync on error
       }
 
       setResult(data);
@@ -198,8 +223,7 @@ export default function App() {
       }, 100);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
-      // Re-fetch profile just in case state got desynced on error
-      if (user) fetchProfile(user.id);
+      if (user) fetchProfile(user.id, user.email);
     } finally {
       setIsLoading(false);
     }
@@ -211,14 +235,14 @@ export default function App() {
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={() => user && fetchProfile(user.id)}
+        onSuccess={() => user && fetchProfile(user.id, user.email)}
       />
 
       <PricingModal 
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
         user={user}
-        onSuccess={() => user && fetchProfile(user.id)}
+        onSuccess={() => user && fetchProfile(user.id, user.email)}
       />
 
       {/* Header */}
@@ -231,7 +255,7 @@ export default function App() {
         {/* Auth Status */}
         <div className="flex items-center min-h-[32px]">
           {!initialAuthCheckDone ? (
-            // Loading state for auth
+            // Loading state for auth - now guaranteed to disappear after timeout
             <div className="h-8 w-24 bg-slate-800/50 animate-pulse rounded-lg"></div>
           ) : user ? (
             <div className="flex items-center gap-3 md:gap-6 animate-fade-in-up">
