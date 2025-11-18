@@ -1,10 +1,12 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { STRATEGIES } from './constants';
 import { Strategy, GenerationResult } from './types';
 import { generateHashtags } from './services/geminiService';
 import { StrategyCard } from './components/StrategyCard';
 import { Spinner } from './components/Spinner';
 import { ResultsView } from './components/ResultsView';
+import { supabase } from './lib/supabase';
+import { AuthModal } from './components/AuthModal';
 
 export default function App() {
   const [theme, setTheme] = useState('');
@@ -13,12 +15,45 @@ export default function App() {
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // Auth State
+  const [user, setUser] = useState<any>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [initialAuthCheckDone, setInitialAuthCheckDone] = useState(false);
+  
   // Ref to scroll to results
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Check Session on Mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user || null);
+      setInitialAuthCheckDone(true);
+    };
+    
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setResult(null); // Clear results on sign out
+  };
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
+
+    // AUTH GATE
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -36,16 +71,54 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [theme, selectedStrategy]);
+  }, [theme, selectedStrategy, user]);
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden text-slate-100 selection:bg-purple-500/30">
       
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={() => {
+           // Trigger generation automatically after successful login if they were trying to generate
+           if (theme.trim()) {
+             // We can't easily re-trigger the event, but we can let them click again now that they are logged in
+           }
+        }}
+      />
+
       {/* Minimal Header */}
       <header className="fixed top-0 w-full z-50 px-4 md:px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md border-b border-white/5 transition-all">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-purple-500/20">#</div>
           <span className="font-bold text-xl tracking-tight text-white/90">TagMaster</span>
+        </div>
+
+        {/* Auth Status */}
+        <div>
+          {initialAuthCheckDone && (
+             user ? (
+               <div className="flex items-center gap-4">
+                  <div className="hidden md:flex flex-col items-end">
+                    <span className="text-xs text-slate-400">Logged in as</span>
+                    <span className="text-xs font-medium text-purple-400 max-w-[100px] truncate">{user.email}</span>
+                  </div>
+                  <button 
+                    onClick={handleSignOut}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 border border-white/10 hover:bg-slate-800 transition-colors"
+                  >
+                    Sign Out
+                  </button>
+               </div>
+             ) : (
+               <button 
+                 onClick={() => setIsAuthModalOpen(true)}
+                 className="px-4 py-2 rounded-lg text-xs md:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-all"
+               >
+                 Login
+               </button>
+             )
+          )}
         </div>
       </header>
 
@@ -91,7 +164,7 @@ export default function App() {
                     : 'bg-white text-black hover:bg-slate-200 hover:scale-105 shadow-lg shadow-white/5'
                   }`}
                 >
-                  {isLoading ? <Spinner /> : 'GENERATE'}
+                  {isLoading ? <Spinner /> : (user ? 'GENERATE' : 'LOGIN TO GENERATE')}
                 </button>
               </div>
             </form>
