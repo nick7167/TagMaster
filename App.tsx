@@ -39,39 +39,39 @@ export default function App() {
   }, [theme, selectedStrategy]);
 
   return (
-    <div className="min-h-screen text-slate-100 selection:bg-purple-500/30">
+    <div className="min-h-screen w-full overflow-x-hidden text-slate-100 selection:bg-purple-500/30">
       
       {/* Minimal Header */}
-      <header className="fixed top-0 w-full z-50 px-6 py-4 flex justify-between items-center bg-slate-950/50 backdrop-blur-md border-b border-white/5">
+      <header className="fixed top-0 w-full z-50 px-4 md:px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md border-b border-white/5 transition-all">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-purple-500/20">#</div>
           <span className="font-bold text-xl tracking-tight text-white/90">TagMaster</span>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 pt-32 md:pt-40 pb-20">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-28 md:pt-40 pb-20 w-full">
         
         {/* Hero & Input Section */}
-        <div className={`transition-all duration-700 ease-out ${result ? 'mb-16' : 'min-h-[70vh] flex flex-col justify-center mb-0'}`}>
+        <div className={`transition-all duration-700 ease-out w-full ${result ? 'mb-16' : 'min-h-[70vh] flex flex-col justify-center mb-0'}`}>
           
           {/* Central Search Area */}
-          <div className="w-full max-w-3xl mx-auto text-center space-y-8 mb-16">
-            <div className="space-y-6">
-              <h1 className="text-5xl md:text-7xl font-bold tracking-tight">
+          <div className="w-full max-w-3xl mx-auto text-center space-y-8 mb-12 md:mb-16">
+            <div className="space-y-4 md:space-y-6">
+              <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-tight break-words">
                 Hashtags that <br />
                 <span className="insta-gradient-text">actually work.</span>
               </h1>
-              <p className="text-xl text-slate-400 max-w-xl mx-auto font-light leading-relaxed">
+              <p className="text-lg md:text-xl text-slate-400 max-w-xl mx-auto font-light leading-relaxed px-4">
                 AI-powered strategy for Instagram growth. <br className="hidden md:block"/>Validated by Google Search.
               </p>
             </div>
 
             {/* Search Box */}
-            <form onSubmit={handleSubmit} className="relative group z-20">
+            <form onSubmit={handleSubmit} className="relative group z-20 mx-2 md:mx-0 max-w-full">
               <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-              <div className="relative flex items-center bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 transition-all ring-1 ring-white/5 focus-within:ring-purple-500/50 shadow-2xl">
-                <div className="pl-5 text-slate-500">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="relative flex items-center bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 md:p-2 transition-all ring-1 ring-white/5 focus-within:ring-purple-500/50 shadow-2xl">
+                <div className="pl-3 md:pl-5 text-slate-500 hidden sm:block">
+                  <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                 </div>
@@ -79,13 +79,13 @@ export default function App() {
                   type="text"
                   value={theme}
                   onChange={(e) => setTheme(e.target.value)}
-                  placeholder="Describe your post (e.g., 'Minimalist home office setup')"
-                  className="w-full bg-transparent border-none px-5 py-5 text-lg md:text-xl text-white placeholder-slate-500 focus:outline-none focus:ring-0"
+                  placeholder="Describe your post..."
+                  className="w-full bg-transparent border-none px-3 md:px-5 py-3 md:py-5 text-base md:text-xl text-white placeholder-slate-500 focus:outline-none focus:ring-0 min-w-0"
                 />
                 <button
                   type="submit"
                   disabled={isLoading || !theme}
-                  className={`mr-1 px-8 py-4 rounded-xl font-bold text-sm tracking-wide transition-all duration-300 ${
+                  className={`mr-0 md:mr-1 px-5 py-3 md:px-8 md:py-4 rounded-xl font-bold text-xs md:text-sm tracking-wide transition-all duration-300 flex-shrink-0 ${
                     isLoading || !theme 
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                     : 'bg-white text-black hover:bg-slate-200 hover:scale-105 shadow-lg shadow-white/5'
@@ -100,18 +100,18 @@ export default function App() {
           {/* Strategy Grid - Expanded Width */}
           <div className="w-full space-y-6">
             <div className="flex items-center justify-between px-1 border-b border-white/5 pb-4 max-w-7xl mx-auto">
-                <span className="text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <span className="text-xs md:text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-purple-500"></span>
                   Select Strategy
                 </span>
-                <span className="text-sm text-purple-400 font-medium bg-purple-500/10 px-3 py-1 rounded-full border border-purple-500/20">
+                <span className="text-xs md:text-sm text-purple-400 font-medium bg-purple-500/10 px-3 py-1 rounded-full border border-purple-500/20">
                   {selectedStrategy.name}
                 </span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
               {STRATEGIES.map((strategy) => (
-                <div key={strategy.id} className="h-full">
+                <div key={strategy.id} className="h-full min-w-0">
                   <StrategyCard
                     strategy={strategy}
                     isSelected={selectedStrategy.id === strategy.id}
@@ -125,7 +125,7 @@ export default function App() {
         </div>
 
         {/* Results Section */}
-        <div ref={resultsRef}>
+        <div ref={resultsRef} className="w-full">
           {error && (
             <div className="max-w-3xl mx-auto mb-12 animate-fade-in-up bg-red-500/10 border border-red-500/20 text-red-200 p-6 rounded-2xl flex items-center gap-4 shadow-xl">
                <div className="p-3 bg-red-500/20 rounded-full">
