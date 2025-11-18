@@ -14,28 +14,31 @@ export default function App() {
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy>(STRATEGIES[0]);
   
   // Application State
-  const [isLoading, setIsLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
   // Auth & Profile State
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [isProfileLoading, setIsProfileLoading] = useState(false);
+  
+  // Loading States
+  const [isBooting, setIsBooting] = useState(true); // Initial page load
+  const [isProfileLoading, setIsProfileLoading] = useState(false); // Re-fetching profile
   
   // UI State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
-  const [initialAuthCheckDone, setInitialAuthCheckDone] = useState(false);
   
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  // --- Robust Data Fetching ---
+  // --- Robust Profile Fetching ---
 
-  // Replaced dependency on state 'user' with explicit arguments to prevent stale closures
-  const fetchProfile = useCallback(async (userId: string, userEmail?: string) => {
-    setIsProfileLoading(true);
+  const getProfile = useCallback(async (userId: string, email?: string) => {
     try {
+      setIsProfileLoading(true);
+      
+      // 1. Try to get the profile
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -44,95 +47,81 @@ export default function App() {
 
       if (data) {
         setProfile(data);
-      } else if (error) {
-        // Self Healing: Create profile if specifically missing (PGRST116)
-        if (error.code === 'PGRST116') {
-          console.warn("Profile missing for user, creating default...");
-          const { data: newProfile, error: createError } = await supabase
-            .from('profiles')
-            .insert([{ 
-              id: userId, 
-              email: userEmail || 'user@tagmaster.ai', 
-              credits: 3 
-            }])
-            .select()
-            .single();
-          
-          if (newProfile) {
-            setProfile(newProfile);
-          } else {
-             console.error("Failed to auto-create profile:", createError);
-          }
+        return;
+      }
+
+      // 2. If Error is "Row not found" (PGRST116), Create it immediately
+      // This handles cases where the DB trigger might have failed or didn't run
+      if (error && error.code === 'PGRST116') {
+        console.warn("Profile missing. Attempting self-heal creation...");
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert([{ 
+            id: userId, 
+            email: email || 'user@tagmaster.ai', 
+            credits: 3 
+          }])
+          .select()
+          .single();
+
+        if (newProfile) {
+          setProfile(newProfile);
         } else {
-          console.error("Database error fetching profile:", error);
+          console.error("Self-heal failed:", createError);
         }
       }
     } catch (err) {
-      console.error("Profile fetch unexpected error", err);
+      console.error("Unexpected error in getProfile:", err);
     } finally {
       setIsProfileLoading(false);
     }
   }, []);
 
-  // --- Auth Lifecycle & Realtime Updates ---
+  // --- Initial Boot Logic ---
 
   useEffect(() => {
-    let mounted = true;
-
-    const initializeAuth = async () => {
+    const bootApp = async () => {
+      setIsBooting(true);
       try {
-        // Add a timeout race to prevent indefinite hanging if Supabase is unreachable
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject("Auth timeout"), 5000));
-        const sessionPromise = supabase.auth.getSession();
+        // 1. Get Session
+        const { data: { session } } = await supabase.auth.getSession();
         
-        // @ts-ignore
-        const result: any = await Promise.race([sessionPromise, timeoutPromise]);
-        const session = result?.data?.session;
-
-        if (mounted) {
-          if (session?.user) {
-            setUser(session.user);
-            // Pass email directly from session, do not rely on 'user' state yet
-            await fetchProfile(session.user.id, session.user.email);
-          } else {
-            setUser(null);
-          }
+        if (session?.user) {
+          setUser(session.user);
+          // 2. If User, Get Profile (await it so we don't show partial UI)
+          await getProfile(session.user.id, session.user.email);
+        } else {
+          setUser(null);
+          setProfile(null);
         }
       } catch (err) {
-        console.warn("Auth initialization fallback:", err);
-        // In case of error/timeout, assume logged out but allow app to render
-        if (mounted) setUser(null);
+        console.error("Boot failed:", err);
       } finally {
-        if (mounted) setInitialAuthCheckDone(true);
+        // 3. ALWAYS Finish Booting
+        setIsBooting(false);
       }
     };
 
-    initializeAuth();
+    bootApp();
 
-    // Listen for Auth Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!mounted) return;
-      
-      const currentUser = session?.user || null;
-      
-      // Update user state
-      setUser(currentUser);
-
-      if (currentUser) {
-        // Always refresh profile on auth change to ensure sync
-        await fetchProfile(currentUser.id, currentUser.email);
-      } else {
+    // 4. Set up Realtime Listener for future changes (Login/Logout/Window Focus)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser(session.user);
+        getProfile(session.user.id, session.user.email);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
         setProfile(null);
+        setResult(null);
       }
     });
 
     return () => {
-      mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile]);
+  }, [getProfile]);
 
-  // --- Realtime Database Subscription ---
+  // --- Realtime Database Subscription (Credits) ---
   useEffect(() => {
     if (!user) return;
 
@@ -147,7 +136,10 @@ export default function App() {
           filter: `id=eq.${user.id}`,
         },
         (payload) => {
-          setProfile(payload.new as UserProfile);
+          // Instant update from DB
+          if (payload.new) {
+            setProfile(payload.new as UserProfile);
+          }
         }
       )
       .subscribe();
@@ -157,64 +149,56 @@ export default function App() {
     };
   }, [user]);
 
-  // --- Focus Refetching ---
-  useEffect(() => {
-    const onFocus = () => {
-      if (user) fetchProfile(user.id, user.email);
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [user, fetchProfile]);
-
-
   // --- Actions ---
 
   const handleSignOut = async () => {
-    setProfile(null);
-    setUser(null);
-    setResult(null); 
     await supabase.auth.signOut();
+    // State updates handled by onAuthStateChange
   };
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
 
-    // AUTH GATE
+    // AUTH CHECK
     if (!user) {
       setIsAuthModalOpen(true);
       return;
     }
 
-    // FAIL-CLOSED CREDIT GATE
-    if (isProfileLoading) return; 
-    
+    // CREDIT CHECK
+    // If we are currently loading the profile, we block generation to be safe
+    if (isProfileLoading) return;
+
+    // If profile loaded but credits < 1 (or profile missing entirely for some reason)
     if (!profile || profile.credits < 1) {
       setIsPricingModalOpen(true);
       return;
     }
 
-    setIsLoading(true);
+    setIsGenerating(true);
     setError(null);
     setResult(null);
 
     try {
       const data = await generateHashtags(theme, selectedStrategy);
       
-      // Optimistic UI update
+      // Deduct Credit
+      // 1. Optimistic Update
       if (profile) {
-        setProfile({ ...profile, credits: profile.credits - 1 });
+        setProfile(prev => prev ? { ...prev, credits: prev.credits - 1 } : null);
       }
       
-      // Deduct Credit in DB
-      const { error: creditError } = await supabase
+      // 2. DB Update
+      const { error: dbError } = await supabase
         .from('profiles')
-        .update({ credits: profile.credits - 1 })
+        .update({ credits: (profile.credits - 1) })
         .eq('id', user.id);
           
-      if (creditError) {
-        console.error("Credit deduction failed", creditError);
-        fetchProfile(user.id, user.email); // Revert/Sync on error
+      if (dbError) {
+        // Revert if DB fails
+        console.error("DB deduction failed:", dbError);
+        getProfile(user.id, user.email); 
       }
 
       setResult(data);
@@ -223,11 +207,23 @@ export default function App() {
       }, 100);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
-      if (user) fetchProfile(user.id, user.email);
+      // Refetch to ensure credits are accurate after error
+      getProfile(user.id, user.email);
     } finally {
-      setIsLoading(false);
+      setIsGenerating(false);
     }
-  }, [theme, selectedStrategy, user, profile, isProfileLoading, fetchProfile]);
+  }, [theme, selectedStrategy, user, profile, isProfileLoading, getProfile]);
+
+  // --- RENDER HELPERS ---
+
+  // Show a full screen loader ONLY on the very first mount to prevent flickering
+  if (isBooting) {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center">
+        <Spinner />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden text-slate-100 selection:bg-purple-500/30">
@@ -235,14 +231,17 @@ export default function App() {
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={() => user && fetchProfile(user.id, user.email)}
+        onSuccess={() => {
+           // Modal handles success internally, but we can double check profile here
+           if (user) getProfile(user.id, user.email);
+        }}
       />
 
       <PricingModal 
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
         user={user}
-        onSuccess={() => user && fetchProfile(user.id, user.email)}
+        onSuccess={() => user && getProfile(user.id, user.email)}
       />
 
       {/* Header */}
@@ -254,16 +253,13 @@ export default function App() {
 
         {/* Auth Status */}
         <div className="flex items-center min-h-[32px]">
-          {!initialAuthCheckDone ? (
-            // Loading state for auth - now guaranteed to disappear after timeout
-            <div className="h-8 w-24 bg-slate-800/50 animate-pulse rounded-lg"></div>
-          ) : user ? (
+          {user ? (
             <div className="flex items-center gap-3 md:gap-6 animate-fade-in-up">
               {/* Credit Counter */}
               <div className="hidden md:flex flex-col items-end">
                 <span className="text-xs text-slate-400">Credits</span>
                 <div className="flex items-center gap-1.5 h-5">
-                  {isProfileLoading && !profile ? (
+                  {isProfileLoading ? (
                      <div className="h-4 w-8 bg-slate-800 animate-pulse rounded"></div>
                   ) : (
                     <>
@@ -356,20 +352,20 @@ export default function App() {
                 />
                 <button
                   type="submit"
-                  disabled={isLoading || !theme || (user && isProfileLoading)}
+                  disabled={isGenerating || !theme || (user && isProfileLoading)}
                   className={`mr-0 md:mr-1 px-5 py-3 md:px-8 md:py-4 rounded-xl font-bold text-xs md:text-sm tracking-wide transition-all duration-300 flex-shrink-0 ${
-                    isLoading || !theme || (user && isProfileLoading)
+                    isGenerating || !theme || (user && isProfileLoading)
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                     : 'bg-white text-black hover:bg-slate-200 hover:scale-105 shadow-lg shadow-white/5'
                   }`}
                 >
-                   {isLoading 
+                   {isGenerating 
                       ? <Spinner /> 
                       : !user 
                         ? 'LOGIN TO GENERATE' 
                         : isProfileLoading 
-                          ? 'CHECKING...' 
-                          : 'GENERATE (1 CR)'
+                          ? 'SYNCING...' 
+                          : `GENERATE (${profile ? profile.credits : 0} CR)`
                    }
                 </button>
               </div>
