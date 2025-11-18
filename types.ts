@@ -32,3 +32,9 @@ export interface GenerationResult {
 export interface ApiError {
   message: string;
 }
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  credits: number;
+}

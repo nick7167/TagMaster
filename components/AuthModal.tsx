@@ -11,6 +11,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,15 +24,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
     try {
       if (isSignUp) {
+        if (password !== confirmPassword) {
+          throw new Error("Passwords do not match.");
+        }
+        
         const { error } = await supabase.auth.signUp({
           email,
           password,
         });
         if (error) throw error;
-        // For simple flows, we can treat signup as success, 
-        // though usually you'd wait for email confirmation.
         alert('Account created! You can now sign in.');
-        setIsSignUp(false);
+        setIsSignUp(false); // Switch to login view after success
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -46,6 +49,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleMode = () => {
+    setIsSignUp(!isSignUp);
+    setError(null);
+    setPassword('');
+    setConfirmPassword('');
   };
 
   return (
@@ -63,12 +73,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold text-white mb-2">
-            {isSignUp ? 'Create an Account' : 'Welcome Back'}
+            {isSignUp ? 'Create Account' : 'Welcome Back'}
           </h2>
           <p className="text-slate-400 text-sm">
             {isSignUp 
-              ? 'Join to generate unlimited strategic hashtags.' 
-              : 'Sign in to access your personalized tools.'}
+              ? 'Join to generate strategic hashtags.' 
+              : 'Sign in to access your credits and history.'}
           </p>
         </div>
 
@@ -105,6 +115,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             />
           </div>
 
+          {isSignUp && (
+            <div className="animate-fade-in-up">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 ml-1">Confirm Password</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className={`w-full bg-slate-800/50 border rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all ${
+                   confirmPassword && password !== confirmPassword ? 'border-red-500/50' : 'border-white/10'
+                }`}
+                placeholder="••••••••"
+              />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-red-400 text-[10px] mt-1 ml-1">Passwords do not match</p>
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -120,10 +150,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
         <div className="mt-6 text-center">
           <button
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setError(null);
-            }}
+            onClick={toggleMode}
             className="text-xs md:text-sm text-slate-400 hover:text-purple-400 transition-colors"
           >
             {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
