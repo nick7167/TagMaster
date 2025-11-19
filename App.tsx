@@ -59,7 +59,7 @@ export default function App() {
           .insert([{ 
             id: userId, 
             email: email || 'user@tagmaster.ai', 
-            credits: 3 
+            credits: 1 // Set starting credits to 1 for new users
           }])
           .select()
           .single();
@@ -271,209 +271,189 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <div className="flex flex-col">
-               <span className="font-bold text-sm">Payment Successful!</span>
-               <span className="text-xs text-emerald-200/80">Your credits have been added.</span>
-            </div>
-            <button onClick={() => setShowPaymentSuccess(false)} className="ml-2 hover:bg-emerald-500/20 p-1 rounded-lg transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <span className="font-medium">Payment Successful! Credits Added.</span>
           </div>
         </div>
       )}
 
+      <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-slate-950/80 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+              <span className="text-lg font-bold text-white">#</span>
+            </div>
+            <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden sm:block">
+              TagMaster AI
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-6">
+            {!user ? (
+              <button 
+                onClick={() => setIsAuthModalOpen(true)}
+                className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
+              >
+                Sign In
+              </button>
+            ) : (
+              <>
+                <div 
+                  onClick={() => setIsPricingModalOpen(true)}
+                  className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-purple-500/30 cursor-pointer transition-all"
+                >
+                   <span className="text-xs font-medium text-slate-400 group-hover:text-purple-300">Credits:</span>
+                   <span className={`text-sm font-bold ${
+                     profile?.credits && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'
+                   }`}>
+                     {profile?.credits ?? '-'}
+                   </span>
+                   <div className="w-5 h-5 rounded-full bg-purple-500/10 flex items-center justify-center ml-1 group-hover:bg-purple-500 group-hover:text-white transition-all">
+                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                   </div>
+                </div>
+                
+                <button 
+                  onClick={handleSignOut}
+                  className="text-sm text-slate-500 hover:text-white transition-colors"
+                >
+                  Sign Out
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        
+        <div className="text-center mb-12 animate-fade-in-up">
+          <h1 className="text-4xl md:text-6xl font-bold tracking-tight mb-6">
+            Go Viral with <br className="hidden md:block"/>
+            <span className="insta-gradient-text">Strategic Hashtags</span>
+          </h1>
+          <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
+            Stop guessing. Use AI strategies like the "Pillar Method" to find high-performing tags validated by Google Search.
+          </p>
+        </div>
+
+        <div className="grid lg:grid-cols-12 gap-8 mb-12">
+          {/* Strategy Selection */}
+          <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {STRATEGIES.map((strategy, idx) => (
+              <div key={strategy.id} style={{ animationDelay: `${idx * 100}ms` }} className="animate-fade-in-up">
+                <StrategyCard
+                  strategy={strategy}
+                  isSelected={selectedStrategy.id === strategy.id}
+                  onSelect={setSelectedStrategy}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Input Section */}
+        <div className="max-w-3xl mx-auto mb-16 animate-fade-in-up" style={{ animationDelay: '400ms' }}>
+          <form onSubmit={handleSubmit} className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl opacity-20 group-hover:opacity-40 blur transition duration-500"></div>
+            <div className="relative flex items-center bg-slate-900 border border-white/10 rounded-2xl p-2 shadow-2xl">
+              <div className="pl-4 text-slate-500">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                placeholder="Describe your photo or topic (e.g., 'Sunset yoga in Bali')"
+                className="w-full bg-transparent border-none text-lg text-white placeholder-slate-500 focus:ring-0 px-4 py-4"
+                disabled={isGenerating}
+              />
+              <button
+                type="submit"
+                disabled={isGenerating || !theme.trim()}
+                className={`mr-1 px-6 py-3 rounded-xl font-semibold text-white shadow-lg transition-all duration-300 flex items-center gap-2 ${
+                  isGenerating 
+                    ? 'bg-slate-800 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:shadow-purple-500/25 hover:scale-105'
+                }`}
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Thinking...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Generate</span>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+          
+          {!user && (
+            <p className="text-center mt-4 text-sm text-slate-500">
+              Please <button onClick={() => setIsAuthModalOpen(true)} className="text-purple-400 hover:underline">sign in</button> to start generating.
+            </p>
+          )}
+          
+          {user && profile && profile.credits < 1 && (
+             <p className="text-center mt-4 text-sm text-red-400 bg-red-500/10 py-2 rounded-lg border border-red-500/20 animate-pulse cursor-pointer" onClick={() => setIsPricingModalOpen(true)}>
+              You have 0 credits. Click here to top up.
+            </p>
+          )}
+        </div>
+
+        {/* Results Section */}
+        <div ref={resultsRef}>
+           {error && (
+            <div className="max-w-3xl mx-auto mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-200 text-center animate-fade-in-up">
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <ResultsView result={result} />
+          )}
+        </div>
+      </main>
+
+      <footer className="border-t border-white/5 bg-slate-950 py-12 mt-12">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p className="text-slate-500 text-sm">
+            © {new Date().getFullYear()} TagMaster AI. Powered by Google Gemini & Search.
+          </p>
+        </div>
+      </footer>
+
+      {/* Modals */}
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={() => {
-           if (user) getProfile(user.id, user.email);
+          setIsAuthModalOpen(false);
+          // Wait a tick for session to propagate
+          setTimeout(async () => {
+             const { data: { user: u } } = await supabase.auth.getUser();
+             if (u) {
+               setUser(u);
+               getProfile(u.id, u.email);
+             }
+          }, 500);
         }}
       />
-
+      
       <PricingModal 
-        isOpen={isPricingModalOpen}
+        isOpen={isPricingModalOpen} 
         onClose={() => setIsPricingModalOpen(false)}
         user={user}
-        onSuccess={() => user && getProfile(user.id, user.email)}
+        onSuccess={() => setIsPricingModalOpen(false)}
       />
 
-      {/* Header */}
-      <header className="fixed top-0 w-full z-50 px-4 md:px-6 py-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md border-b border-white/5 transition-all">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.location.reload()}>
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-purple-500/20">#</div>
-          <span className="font-bold text-xl tracking-tight text-white/90">TagMaster</span>
-        </div>
-
-        {/* Auth Status */}
-        <div className="flex items-center min-h-[32px]">
-          {user ? (
-            <div className="flex items-center gap-3 md:gap-6 animate-fade-in-up">
-              {/* Credit Counter */}
-              <div className="hidden md:flex flex-col items-end">
-                <span className="text-xs text-slate-400">Credits</span>
-                <div className="flex items-center gap-1.5 h-5">
-                  {isProfileLoading ? (
-                     <div className="h-4 w-8 bg-slate-800 animate-pulse rounded"></div>
-                  ) : (
-                    <>
-                      <span className={`text-sm font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {profile ? profile.credits : 0}
-                      </span>
-                      <button 
-                        onClick={() => setIsPricingModalOpen(true)}
-                        className="text-[10px] bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 rounded transition-colors"
-                      >
-                        + BUY
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Mobile Credit Display */}
-              <button 
-                 onClick={() => setIsPricingModalOpen(true)}
-                 className="md:hidden flex items-center gap-1 bg-slate-800/50 px-2 py-1 rounded-lg border border-white/10"
-              >
-                 <span className={`text-xs font-bold ${profile && profile.credits > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {profile ? profile.credits : 0}
-                 </span>
-                 <span className="text-[10px] text-slate-400">cr</span>
-              </button>
-
-              <div className="h-8 w-px bg-white/10 mx-1 hidden md:block"></div>
-
-              <div className="hidden md:flex flex-col items-end">
-                <span className="text-xs text-slate-400">Account</span>
-                <span className="text-xs font-medium text-white max-w-[100px] truncate">{user.email}</span>
-              </div>
-              
-              <button 
-                onClick={handleSignOut}
-                className="p-2 md:px-3 md:py-1.5 rounded-lg text-xs font-medium text-slate-300 border border-white/10 hover:bg-slate-800 transition-colors"
-                title="Sign Out"
-              >
-                <span className="hidden md:inline">Sign Out</span>
-                <svg className="w-5 h-5 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
-            </div>
-          ) : (
-            <button 
-              onClick={() => setIsAuthModalOpen(true)}
-              className="px-4 py-2 rounded-lg text-xs md:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-all border border-white/5 animate-fade-in-up"
-            >
-              Login / Sign Up
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-28 md:pt-40 pb-20 w-full">
-        
-        {/* Hero & Input Section */}
-        <div className={`transition-all duration-700 ease-out w-full ${result ? 'mb-16' : 'min-h-[70vh] flex flex-col justify-center mb-0'}`}>
-          
-          {/* Central Search Area */}
-          <div className="w-full max-w-3xl mx-auto text-center space-y-8 mb-12 md:mb-16">
-            <div className="space-y-4 md:space-y-6">
-              <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-tight break-words">
-                Hashtags that <br />
-                <span className="insta-gradient-text">actually work.</span>
-              </h1>
-              <p className="text-lg md:text-xl text-slate-400 max-w-xl mx-auto font-light leading-relaxed px-4">
-                AI-powered strategy for Instagram growth. <br className="hidden md:block"/>Validated by Google Search.
-              </p>
-            </div>
-
-            {/* Search Box */}
-            <form onSubmit={handleSubmit} className="relative group z-20 mx-2 md:mx-0 max-w-full">
-              <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-              <div className="relative flex items-center bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 md:p-2 transition-all ring-1 ring-white/5 focus-within:ring-purple-500/50 shadow-2xl">
-                <div className="pl-3 md:pl-5 text-slate-500 hidden sm:block">
-                  <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-                <input
-                  type="text"
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value)}
-                  placeholder="Describe your post..."
-                  className="w-full bg-transparent border-none px-3 md:px-5 py-3 md:py-5 text-base md:text-xl text-white placeholder-slate-500 focus:outline-none focus:ring-0 min-w-0"
-                />
-                <button
-                  type="submit"
-                  disabled={isGenerating || !theme || (user && isProfileLoading)}
-                  className={`mr-0 md:mr-1 px-5 py-3 md:px-8 md:py-4 rounded-xl font-bold text-xs md:text-sm tracking-wide transition-all duration-300 flex-shrink-0 ${
-                    isGenerating || !theme || (user && isProfileLoading)
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                    : 'bg-white text-black hover:bg-slate-200 hover:scale-105 shadow-lg shadow-white/5'
-                  }`}
-                >
-                   {isGenerating 
-                      ? <Spinner /> 
-                      : !user 
-                        ? 'LOGIN TO GENERATE' 
-                        : isProfileLoading 
-                          ? 'SYNCING...' 
-                          : 'GENERATE (1 CR)'
-                   }
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Strategy Grid */}
-          <div className="w-full space-y-6">
-            <div className="flex items-center justify-between px-1 border-b border-white/5 pb-4 max-w-7xl mx-auto">
-                <span className="text-xs md:text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                  Select Strategy
-                </span>
-                <span className="text-xs md:text-sm text-purple-400 font-medium bg-purple-500/10 px-3 py-1 rounded-full border border-purple-500/20">
-                  {selectedStrategy.name}
-                </span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-              {STRATEGIES.map((strategy) => (
-                <div key={strategy.id} className="h-full min-w-0">
-                  <StrategyCard
-                    strategy={strategy}
-                    isSelected={selectedStrategy.id === strategy.id}
-                    onSelect={setSelectedStrategy}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
-        {/* Results Section */}
-        <div ref={resultsRef} className="w-full">
-          {error && (
-            <div className="max-w-3xl mx-auto mb-12 animate-fade-in-up bg-red-500/10 border border-red-500/20 text-red-200 p-6 rounded-2xl flex items-center gap-4 shadow-xl">
-               <div className="p-3 bg-red-500/20 rounded-full">
-                 <svg className="w-6 h-6 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                 </svg>
-               </div>
-               <div className="flex-1">
-                 <h3 className="font-bold text-red-100 mb-1">Generation Error</h3>
-                 <p className="text-sm text-red-300/80">{error}</p>
-               </div>
-            </div>
-          )}
-
-          {result && <ResultsView result={result} />}
-        </div>
-
-      </main>
     </div>
   );
 }
