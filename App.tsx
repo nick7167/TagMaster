@@ -82,28 +82,31 @@ export default function App() {
     const bootApp = async () => {
       setIsBooting(true);
       try {
-        // 1. Get Session
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          setUser(session.user);
-          // 2. If User, Get Profile
-          await getProfile(session.user.id, session.user.email);
+        // 1. CRITICAL FIX: Use getUser() instead of getSession()
+        // getSession reads from LocalStorage (which might be stale/corrupt).
+        // getUser verifies the token with the Supabase server.
+        const { data: { user: validUser }, error: userError } = await supabase.auth.getUser();
+
+        if (validUser) {
+          setUser(validUser);
+          await getProfile(validUser.id, validUser.email);
         } else {
+          // Token is invalid or expired, clear state
+          if (userError) console.warn("Session invalid, logging out:", userError.message);
+          await supabase.auth.signOut();
           setUser(null);
           setProfile(null);
         }
       } catch (err) {
         console.error("Boot failed:", err);
       } finally {
-        // 3. ALWAYS Finish Booting
         setIsBooting(false);
       }
     };
 
     bootApp();
 
-    // 4. Set up Realtime Listener for future changes (Login/Logout)
+    // 2. Set up Realtime Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
@@ -121,11 +124,17 @@ export default function App() {
   }, [getProfile]);
 
   // --- Smart Revalidation on Window Focus ---
-  // If user switches tabs and comes back, we force a silent update to ensure credits are fresh
   useEffect(() => {
-    const handleFocus = () => {
+    const handleFocus = async () => {
       if (user) {
-        getProfile(user.id, user.email, true); // true = background fetch (no loading spinner)
+        // Double check valid session on focus too
+        const { data: { user: validUser } } = await supabase.auth.getUser();
+        if (validUser) {
+            getProfile(validUser.id, validUser.email, true);
+        } else {
+            // Ensure we log out if session died while tab was backgrounded
+            handleSignOut(); 
+        }
       }
     };
 
@@ -151,7 +160,6 @@ export default function App() {
           filter: `id=eq.${user.id}`,
         },
         (payload) => {
-          // Instant update from DB
           if (payload.new) {
             setProfile(payload.new as UserProfile);
           }
@@ -167,8 +175,16 @@ export default function App() {
   // --- Actions ---
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    // State updates handled by onAuthStateChange
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Supabase signout error:", err);
+    } finally {
+      // NUCLEAR OPTION: Force clear everything to fix stuck sessions
+      localStorage.clear(); 
+      sessionStorage.clear();
+      window.location.href = '/'; // Force reload
+    }
   };
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
