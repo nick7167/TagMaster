@@ -52,14 +52,15 @@ export default function App() {
       }
 
       // 2. If Error is "Row not found" (PGRST116), Create it immediately
+      // Using upsert instead of insert to handle race conditions where a trigger might have created the row
       if (error && error.code === 'PGRST116') {
         console.warn("Profile missing. Attempting self-heal creation...");
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
-          .insert([{ 
+          .upsert([{ 
             id: userId, 
             email: email || 'user@tagmaster.ai', 
-            credits: 1 // Set starting credits to 1 for new users
+            credits: 1 // Enforce 1 credit for new users
           }])
           .select()
           .single();
