@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
 import { UserProfile } from '../types';
 
 interface PricingModalProps {
@@ -14,61 +13,81 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
 
   if (!isOpen) return null;
 
-  const handleBuyCredits = async (amount: number, price: string, id: string) => {
+  const handleBuyCredits = async (priceId: string, planId: string) => {
     if (!user) return;
-    setLoading(id);
+    setLoading(planId);
     
     try {
-        // In a real app, this would trigger a Stripe Checkout session.
-        // For this demo, we will just update the Supabase DB directly to simulate a purchase.
-        
-        // 1. Get current credits
-        const { data: currentProfile } = await supabase
-            .from('profiles')
-            .select('credits')
-            .eq('id', user.id)
-            .single();
-            
-        const currentCredits = currentProfile?.credits || 0;
-        
-        // 2. Add purchased credits
-        const { error } = await supabase
-            .from('profiles')
-            .update({ credits: currentCredits + amount })
-            .eq('id', user.id);
+      // Call Vercel Serverless Function
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          priceId: priceId,
+          userId: user.id,
+          returnUrl: window.location.origin,
+        }),
+      });
 
-        if (error) throw error;
-        
-        // Success flow
-        setTimeout(() => {
-            onSuccess(); // Refresh parent state
-            alert(`Successfully added ${amount} credits!`);
-            setLoading(null);
-            onClose();
-        }, 1000);
+      const data = await response.json();
 
-    } catch (err) {
-        console.error(err);
-        alert("Purchase failed. Please try again.");
-        setLoading(null);
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to initiate checkout');
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("No checkout URL returned");
+      }
+
+    } catch (err: any) {
+      console.error("Payment initiation failed:", err);
+      alert("Could not start payment: " + (err.message || "Unknown error"));
+      setLoading(null);
     }
   };
 
+  // !!! IMPORTANT: REPLACE THESE 'price_...' STRINGS WITH YOUR ACTUAL IDs FROM STRIPE DASHBOARD !!!
   const plans = [
-    { id: 'starter', credits: 10, price: '$4.99', name: 'Starter', color: 'from-blue-400 to-cyan-300', popular: false },
-    { id: 'growth', credits: 50, price: '$14.99', name: 'Growth', color: 'from-purple-400 to-pink-400', popular: true },
-    { id: 'agency', credits: 200, price: '$39.99', name: 'Agency', color: 'from-amber-300 to-orange-400', popular: false },
+    { 
+      id: 'starter', 
+      stripePriceId: 'price_1SUz4nBDt2AVRrTBFELs3ghm', // TODO: Replace with "Starter" Price ID from Stripe
+      credits: 10, 
+      price: '$4.99', 
+      name: 'Starter', 
+      color: 'from-blue-400 to-cyan-300', 
+      popular: false 
+    },
+    { 
+      id: 'growth', 
+      stripePriceId: 'price_1SUz5OBDt2AVRrTBcg858nNx', // TODO: Replace with "Growth" Price ID from Stripe
+      credits: 50, 
+      price: '$14.99', 
+      name: 'Growth', 
+      color: 'from-purple-400 to-pink-400', 
+      popular: true 
+    },
+    { 
+      id: 'agency', 
+      stripePriceId: 'price_1SUz5jBDt2AVRrTBh5gpvo3W', // TODO: Replace with "Agency" Price ID from Stripe
+      credits: 200, 
+      price: '$39.99', 
+      name: 'Agency', 
+      color: 'from-amber-300 to-orange-400', 
+      popular: false 
+    },
   ];
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-slate-950/90 backdrop-blur-md transition-opacity"
         onClick={onClose}
       ></div>
 
-      {/* Modal Content */}
       <div className="relative w-full max-w-4xl bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-10 shadow-2xl overflow-hidden animate-fade-in-up max-h-[90vh] overflow-y-auto">
         
         <button 
@@ -129,7 +148,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
               </ul>
 
               <button
-                onClick={() => handleBuyCredits(plan.credits, plan.price, plan.id)}
+                onClick={() => handleBuyCredits(plan.stripePriceId, plan.id)}
                 disabled={!!loading}
                 className={`w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all ${
                   loading === plan.id
