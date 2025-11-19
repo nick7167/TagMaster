@@ -365,7 +365,7 @@ export default function App() {
                         ? 'LOGIN TO GENERATE' 
                         : isProfileLoading 
                           ? 'SYNCING...' 
-                          : `GENERATE (${profile ? profile.credits : 0} CR)`
+                          : 'GENERATE (1 CR)'
                    }
                 </button>
               </div>
