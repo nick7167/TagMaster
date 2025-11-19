@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { priceId, userId, returnUrl } = req.body;
+    const { priceId, userId, returnUrl, credits } = req.body;
 
     if (!priceId || !userId) {
       return res.status(400).json({ error: 'Missing priceId or userId' });
@@ -23,10 +23,11 @@ export default async function handler(req, res) {
         },
       ],
       mode: 'payment',
-      success_url: `${returnUrl}?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${returnUrl}?session_id={CHECKOUT_SESSION_ID}&payment_success=true`,
       cancel_url: `${returnUrl}`,
       metadata: {
         userId: userId,
+        credits: credits || 10, // Store the amount of credits to give in the transaction itself
       },
     });
 

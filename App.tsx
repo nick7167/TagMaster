@@ -29,6 +29,7 @@ export default function App() {
   // UI State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -83,15 +84,12 @@ export default function App() {
       setIsBooting(true);
       try {
         // 1. CRITICAL FIX: Use getUser() instead of getSession()
-        // getSession reads from LocalStorage (which might be stale/corrupt).
-        // getUser verifies the token with the Supabase server.
         const { data: { user: validUser }, error: userError } = await supabase.auth.getUser();
 
         if (validUser) {
           setUser(validUser);
           await getProfile(validUser.id, validUser.email);
         } else {
-          // Token is invalid or expired, clear state
           if (userError) console.warn("Session invalid, logging out:", userError.message);
           await supabase.auth.signOut();
           setUser(null);
@@ -123,16 +121,33 @@ export default function App() {
     };
   }, [getProfile]);
 
+  // --- Handle Payment Success Return ---
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('payment_success')) {
+      setShowPaymentSuccess(true);
+      // Clean URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      
+      // Force refresh profile to see new credits
+      if (user) {
+        getProfile(user.id, user.email, true);
+      }
+      
+      // Hide toast after 5 seconds
+      setTimeout(() => setShowPaymentSuccess(false), 5000);
+    }
+  }, [user, getProfile]);
+
   // --- Smart Revalidation on Window Focus ---
   useEffect(() => {
     const handleFocus = async () => {
       if (user) {
-        // Double check valid session on focus too
         const { data: { user: validUser } } = await supabase.auth.getUser();
         if (validUser) {
             getProfile(validUser.id, validUser.email, true);
         } else {
-            // Ensure we log out if session died while tab was backgrounded
             handleSignOut(); 
         }
       }
@@ -146,7 +161,6 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Use a unique channel key per user/session to avoid collisions and stale listeners
     const channelKey = `user-credits-${user.id}-${Date.now()}`;
 
     const channel = supabase
@@ -180,7 +194,6 @@ export default function App() {
     } catch (err) {
       console.error("Supabase signout error:", err);
     } finally {
-      // NUCLEAR OPTION: Force clear everything to fix stuck sessions
       localStorage.clear(); 
       sessionStorage.clear();
       window.location.href = '/'; // Force reload
@@ -191,17 +204,13 @@ export default function App() {
     e.preventDefault();
     if (!theme.trim()) return;
 
-    // AUTH CHECK
     if (!user) {
       setIsAuthModalOpen(true);
       return;
     }
 
-    // CREDIT CHECK
-    // If we are currently loading the profile (blocking fetch), we wait
     if (isProfileLoading) return;
 
-    // If profile loaded but credits < 1
     if (!profile || profile.credits < 1) {
       setIsPricingModalOpen(true);
       return;
@@ -214,13 +223,10 @@ export default function App() {
     try {
       const data = await generateHashtags(theme, selectedStrategy);
       
-      // Deduct Credit
-      // 1. Optimistic Update
       if (profile) {
         setProfile(prev => prev ? { ...prev, credits: prev.credits - 1 } : null);
       }
       
-      // 2. DB Update
       const { error: dbError } = await supabase
         .from('profiles')
         .update({ credits: (profile.credits - 1) })
@@ -228,9 +234,8 @@ export default function App() {
           
       if (dbError) {
         console.error("DB deduction failed:", dbError);
-        getProfile(user.id, user.email); // Revert/Fix on error
+        getProfile(user.id, user.email);
       } else {
-        // Success: Silent background fetch to ensure we are perfectly in sync with DB
         getProfile(user.id, user.email, true);
       }
 
@@ -246,8 +251,6 @@ export default function App() {
     }
   }, [theme, selectedStrategy, user, profile, isProfileLoading, getProfile]);
 
-  // --- RENDER HELPERS ---
-
   if (isBooting) {
     return (
       <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center">
@@ -259,6 +262,28 @@ export default function App() {
   return (
     <div className="min-h-screen w-full overflow-x-hidden text-slate-100 selection:bg-purple-500/30">
       
+      {/* Success Toast */}
+      {showPaymentSuccess && (
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[100] animate-fade-in-up">
+          <div className="bg-emerald-500/20 border border-emerald-500/50 text-emerald-100 px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 backdrop-blur-md">
+            <div className="bg-emerald-500 rounded-full p-1">
+              <svg className="w-4 h-4 text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="flex flex-col">
+               <span className="font-bold text-sm">Payment Successful!</span>
+               <span className="text-xs text-emerald-200/80">Your credits have been added.</span>
+            </div>
+            <button onClick={() => setShowPaymentSuccess(false)} className="ml-2 hover:bg-emerald-500/20 p-1 rounded-lg transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}

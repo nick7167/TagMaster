@@ -36,19 +36,20 @@ export default async function handler(req, res) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const userId = session.metadata.userId;
-    const amount = session.amount_total;
+    
+    // Robustly get credits from metadata, fallback to logic if missing
+    let creditsToAdd = 10;
+    if (session.metadata && session.metadata.credits) {
+      creditsToAdd = parseInt(session.metadata.credits);
+    } else {
+      // Fallback logic based on amount if metadata fails
+      const amount = session.amount_total;
+      if (amount >= 3900) creditsToAdd = 200;
+      else if (amount >= 1400) creditsToAdd = 50;
+      else creditsToAdd = 10;
+    }
 
     if (userId) {
-      // Simple logic: Match amount to credits
-      // $4.99 (499 cents) = 10 credits
-      // $14.99 (1499 cents) = 50 credits
-      // $39.99 (3999 cents) = 200 credits
-      
-      let creditsToAdd = 10; // Default
-      if (amount === 499) creditsToAdd = 10;
-      else if (amount === 1499) creditsToAdd = 50;
-      else if (amount === 3999) creditsToAdd = 200;
-
       // 1. Get current profile
       const { data: profile, error: fetchError } = await supabase
         .from('profiles')

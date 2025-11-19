@@ -13,7 +13,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
 
   if (!isOpen) return null;
 
-  const handleBuyCredits = async (priceId: string, planId: string) => {
+  const handleBuyCredits = async (priceId: string, planId: string, credits: number) => {
     if (!user) return;
     setLoading(planId);
     
@@ -27,6 +27,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
         body: JSON.stringify({
           priceId: priceId,
           userId: user.id,
+          credits: credits, // Pass credits explicitly
           returnUrl: window.location.origin,
         }),
       });
@@ -54,7 +55,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
   const plans = [
     { 
       id: 'starter', 
-      stripePriceId: 'price_1SUz4nBDt2AVRrTBFELs3ghm', // TODO: Replace with "Starter" Price ID from Stripe
+      stripePriceId: 'price_1SUz4nBDt2AVRrTBFELs3ghm', // TODO: Replace with "Starter" Price ID
       credits: 10, 
       price: '$4.99', 
       name: 'Starter', 
@@ -63,7 +64,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
     },
     { 
       id: 'growth', 
-      stripePriceId: 'price_1SUz5OBDt2AVRrTBcg858nNx', // TODO: Replace with "Growth" Price ID from Stripe
+      stripePriceId: 'price_1SUz5OBDt2AVRrTBcg858nNx', // TODO: Replace with "Growth" Price ID
       credits: 50, 
       price: '$14.99', 
       name: 'Growth', 
@@ -72,7 +73,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
     },
     { 
       id: 'agency', 
-      stripePriceId: 'price_1SUz5jBDt2AVRrTBh5gpvo3W', // TODO: Replace with "Agency" Price ID from Stripe
+      stripePriceId: 'price_1SUz5jBDt2AVRrTBh5gpvo3W', // TODO: Replace with "Agency" Price ID
       credits: 200, 
       price: '$39.99', 
       name: 'Agency', 
@@ -148,7 +149,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, use
               </ul>
 
               <button
-                onClick={() => handleBuyCredits(plan.stripePriceId, plan.id)}
+                onClick={() => handleBuyCredits(plan.stripePriceId, plan.id, plan.credits)}
                 disabled={!!loading}
                 className={`w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all ${
                   loading === plan.id
