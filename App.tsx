@@ -34,9 +34,9 @@ export default function App() {
 
   // --- Robust Profile Fetching ---
 
-  const getProfile = useCallback(async (userId: string, email?: string) => {
+  const getProfile = useCallback(async (userId: string, email?: string, isBackground = false) => {
     try {
-      setIsProfileLoading(true);
+      if (!isBackground) setIsProfileLoading(true);
       
       // 1. Try to get the profile
       const { data, error } = await supabase
@@ -51,7 +51,6 @@ export default function App() {
       }
 
       // 2. If Error is "Row not found" (PGRST116), Create it immediately
-      // This handles cases where the DB trigger might have failed or didn't run
       if (error && error.code === 'PGRST116') {
         console.warn("Profile missing. Attempting self-heal creation...");
         const { data: newProfile, error: createError } = await supabase
@@ -73,7 +72,7 @@ export default function App() {
     } catch (err) {
       console.error("Unexpected error in getProfile:", err);
     } finally {
-      setIsProfileLoading(false);
+      if (!isBackground) setIsProfileLoading(false);
     }
   }, []);
 
@@ -88,7 +87,7 @@ export default function App() {
         
         if (session?.user) {
           setUser(session.user);
-          // 2. If User, Get Profile (await it so we don't show partial UI)
+          // 2. If User, Get Profile
           await getProfile(session.user.id, session.user.email);
         } else {
           setUser(null);
@@ -104,7 +103,7 @@ export default function App() {
 
     bootApp();
 
-    // 4. Set up Realtime Listener for future changes (Login/Logout/Window Focus)
+    // 4. Set up Realtime Listener for future changes (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
@@ -121,12 +120,28 @@ export default function App() {
     };
   }, [getProfile]);
 
+  // --- Smart Revalidation on Window Focus ---
+  // If user switches tabs and comes back, we force a silent update to ensure credits are fresh
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user) {
+        getProfile(user.id, user.email, true); // true = background fetch (no loading spinner)
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [user, getProfile]);
+
   // --- Realtime Database Subscription (Credits) ---
   useEffect(() => {
     if (!user) return;
 
+    // Use a unique channel key per user/session to avoid collisions and stale listeners
+    const channelKey = `user-credits-${user.id}-${Date.now()}`;
+
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel(channelKey)
       .on(
         'postgres_changes',
         {
@@ -167,10 +182,10 @@ export default function App() {
     }
 
     // CREDIT CHECK
-    // If we are currently loading the profile, we block generation to be safe
+    // If we are currently loading the profile (blocking fetch), we wait
     if (isProfileLoading) return;
 
-    // If profile loaded but credits < 1 (or profile missing entirely for some reason)
+    // If profile loaded but credits < 1
     if (!profile || profile.credits < 1) {
       setIsPricingModalOpen(true);
       return;
@@ -196,9 +211,11 @@ export default function App() {
         .eq('id', user.id);
           
       if (dbError) {
-        // Revert if DB fails
         console.error("DB deduction failed:", dbError);
-        getProfile(user.id, user.email); 
+        getProfile(user.id, user.email); // Revert/Fix on error
+      } else {
+        // Success: Silent background fetch to ensure we are perfectly in sync with DB
+        getProfile(user.id, user.email, true);
       }
 
       setResult(data);
@@ -207,7 +224,6 @@ export default function App() {
       }, 100);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
-      // Refetch to ensure credits are accurate after error
       getProfile(user.id, user.email);
     } finally {
       setIsGenerating(false);
@@ -216,7 +232,6 @@ export default function App() {
 
   // --- RENDER HELPERS ---
 
-  // Show a full screen loader ONLY on the very first mount to prevent flickering
   if (isBooting) {
     return (
       <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center">
@@ -232,7 +247,6 @@ export default function App() {
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={() => {
-           // Modal handles success internally, but we can double check profile here
            if (user) getProfile(user.id, user.email);
         }}
       />
